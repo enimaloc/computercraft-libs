@@ -2,7 +2,7 @@ local programDir = fs.getDir(shell.getRunningProgram())
 if programDir:sub(1, 1) ~= "/" then
     programDir = "/" .. programDir
 end
-local bootstrapPath = fs.combine(programDir, "../../lib/bootstrap.lua")
+local bootstrapPath = fs.combine(programDir, "../lib/bootstrap.lua")
 if fs.exists(bootstrapPath) then
     dofile(bootstrapPath)(programDir)
 else

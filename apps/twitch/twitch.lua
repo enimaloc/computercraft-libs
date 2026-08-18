@@ -21,7 +21,7 @@ if programDir:sub(1, 1) ~= "/" then
 end
 -- Sur un deploiement flat (install.lua, /twitch/) projects/lib/bootstrap.lua
 -- n'existe pas : dofile echoue, donc on l'appelle seulement s'il est present.
-local bootstrapPath = fs.combine(programDir, "../../lib/bootstrap.lua")
+local bootstrapPath = fs.combine(programDir, "../lib/bootstrap.lua")
 if fs.exists(bootstrapPath) then
     dofile(bootstrapPath)(programDir)
 else
