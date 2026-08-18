@@ -21,6 +21,21 @@ local function closeModem(sModem)
     end
 end
 
+--- Enveloppe rednet.send(nID, tFields, "chat") : tous les paquets du
+--- protocole "chat" partagent ce meme envoi, seuls les champs varient.
+local function sendChat(nID, tFields)
+    rednet.send(nID, tFields, "chat")
+end
+
+--- Execute fn(), et transforme toute erreur non capturee en evenement
+--- "chat_error" plutot que de faire planter le programme consommateur.
+local function guarded(fn)
+    local ok, err = pcall(fn)
+    if not ok then
+        os.queueEvent("chat_error", err)
+    end
+end
+
 --------------------------------------------------------------------------
 -- ChatHost
 --------------------------------------------------------------------------
@@ -39,6 +54,16 @@ ChatHost.__index = ChatHost
 ---                Appele a la connexion (tUser == nil) et sur /nick (tUser
 ---                == l'utilisateur qui se renomme). bKeep == false rejette
 ---                le pseudo (le 2e retour, si present, est renvoye en prive).
+---   onLogin    : function(tUser) -> bAnnounce, sTexte
+---                Appele juste apres qu'un utilisateur ait rejoint (deja
+---                ajoute a tUsers). bAnnounce == false supprime le message
+---                "* a rejoint le chat" habituel ; sTexte (si fourni) le
+---                remplace.
+---   onLogout   : function(tUser, sRaison) -> bAnnounce, sTexte
+---                Appele juste avant qu'un utilisateur ne soit retire de
+---                tUsers, que ce soit un /logout explicite ou un timeout de
+---                ping-pong (sRaison: "logout" ou "timeout"). Meme contrat
+---                que onLogin pour bAnnounce/sTexte.
 function ChatHost.new(sHostname, tOptions)
     tOptions = tOptions or {}
 
@@ -50,6 +75,8 @@ function ChatHost.new(sHostname, tOptions)
         tPingPongTimer = {},
         onMessage = tOptions.onMessage,
         onNickname = tOptions.onNickname,
+        onLogin = tOptions.onLogin,
+        onLogout = tOptions.onLogout,
     }, ChatHost)
 
     self.tCommands = {
@@ -105,19 +132,11 @@ function ChatHost:send(sText, nUserID)
     if nUserID then
         local tUser = self.tUsers[nUserID]
         if tUser then
-            rednet.send(tUser.nID, {
-                sType = "text",
-                nUserID = nUserID,
-                sText = sText,
-            }, "chat")
+            sendChat(tUser.nID, { sType = "text", nUserID = nUserID, sText = sText })
         end
     else
-        for nUserID, tUser in pairs(self.tUsers) do
-            rednet.send(tUser.nID, {
-                sType = "text",
-                nUserID = nUserID,
-                sText = sText,
-            }, "chat")
+        for nOtherUserID, tUser in pairs(self.tUsers) do
+            sendChat(tUser.nID, { sType = "text", nUserID = nOtherUserID, sText = sText })
         end
     end
     os.queueEvent("chat_message", sText, nUserID)
@@ -132,12 +151,48 @@ function ChatHost:sendAs(sUsername, sText, nUserID)
     self:send("<" .. sUsername .. "> " .. sText, nUserID)
 end
 
+--- Ajoute un utilisateur (login accepte), annonce son arrivee (sauf si
+--- onLogin renvoie bAnnounce == false) et demarre son ping-pong.
+function ChatHost:addUser(nSenderID, nUserID, sUsername)
+    local tUser = { nID = nSenderID, nUserID = nUserID, sUsername = sUsername }
+    self.tUsers[nUserID] = tUser
+    self.nUsers = self.nUsers + 1
+    os.queueEvent("chat_user_joined", sUsername, nUserID)
+
+    local bAnnounce, sText = true, nil
+    if self.onLogin then
+        bAnnounce, sText = self.onLogin(tUser)
+    end
+    if bAnnounce ~= false then
+        self:send(sText or ("* " .. sUsername .. " has joined the chat"))
+    end
+
+    self:ping(nUserID)
+end
+
+--- Retire un utilisateur (logout explicite ou timeout de ping-pong,
+--- sRaison: "logout" ou "timeout"), annonce son depart (sauf si onLogout
+--- renvoie bAnnounce == false) et queue chat_user_left.
+function ChatHost:removeUser(tUser, sRaison)
+    local bAnnounce, sText = true, nil
+    if self.onLogout then
+        bAnnounce, sText = self.onLogout(tUser, sRaison)
+    end
+    if bAnnounce ~= false then
+        local sDefault = sRaison == "timeout"
+            and ("* " .. tUser.sUsername .. " has timed out")
+            or ("* " .. tUser.sUsername .. " has left the chat")
+        self:send(sText or sDefault)
+    end
+
+    self.tUsers[tUser.nUserID] = nil
+    self.nUsers = self.nUsers - 1
+    os.queueEvent("chat_user_left", tUser.sUsername, tUser.nUserID)
+end
+
 function ChatHost:ping(nUserID)
     local tUser = self.tUsers[nUserID]
-    rednet.send(tUser.nID, {
-        sType = "ping to client",
-        nUserID = nUserID,
-    }, "chat")
+    sendChat(tUser.nID, { sType = "ping to client", nUserID = nUserID })
 
     local timer = os.startTimer(15)
     tUser.bPingPonged = false
@@ -154,10 +209,7 @@ function ChatHost:handlePingTimeout(nTimerId)
     if nUserID and self.tUsers[nUserID] then
         local tUser = self.tUsers[nUserID]
         if not tUser.bPingPonged then
-            self:send("* " .. tUser.sUsername .. " has timed out")
-            self.tUsers[nUserID] = nil
-            self.nUsers = self.nUsers - 1
-            os.queueEvent("chat_user_left", tUser.sUsername, nUserID)
+            self:removeUser(tUser, "timeout")
         else
             self:ping(nUserID)
         end
@@ -188,23 +240,15 @@ function ChatHost:handleMessage(nSenderID, tMessage)
             if self.onNickname then
                 local bKeep, sReason = self.onNickname(sUsername, nil)
                 if bKeep == false then
-                    rednet.send(nSenderID, {
+                    sendChat(nSenderID, {
                         sType = "text",
                         nUserID = nUserID,
                         sText = sReason or ("* Nickname refused: " .. sUsername),
-                    }, "chat")
+                    })
                     return
                 end
             end
-            self.tUsers[nUserID] = {
-                nID = nSenderID,
-                nUserID = nUserID,
-                sUsername = sUsername,
-            }
-            self.nUsers = self.nUsers + 1
-            os.queueEvent("chat_user_joined", sUsername, nUserID)
-            self:send("* " .. sUsername .. " has joined the chat")
-            self:ping(nUserID)
+            self:addUser(nSenderID, nUserID, sUsername)
         end
         return
     end
@@ -216,10 +260,7 @@ function ChatHost:handleMessage(nSenderID, tMessage)
     end
 
     if tMessage.sType == "logout" then
-        self:send("* " .. tUser.sUsername .. " has left the chat")
-        self.tUsers[nUserID] = nil
-        self.nUsers = self.nUsers - 1
-        os.queueEvent("chat_user_left", tUser.sUsername, nUserID)
+        self:removeUser(tUser, "logout")
 
     elseif tMessage.sType == "chat" then
         local sMessage = tMessage.sText
@@ -251,10 +292,7 @@ function ChatHost:handleMessage(nSenderID, tMessage)
         end
 
     elseif tMessage.sType == "ping to server" then
-        rednet.send(tUser.nID, {
-            sType = "pong to client",
-            nUserID = nUserID,
-        }, "chat")
+        sendChat(tUser.nID, { sType = "pong to client", nUserID = nUserID })
 
     elseif tMessage.sType == "pong to server" then
         tUser.bPingPonged = true
@@ -273,18 +311,17 @@ function ChatHost:start()
     end
     rednet.host("chat", self.sHostname)
 
-    local ok, err = pcall(parallel.waitForAny,
-        function() self:runPingPong() end,
-        function()
-            while true do
-                local nSenderID, tMessage = rednet.receive("chat")
-                self:handleMessage(nSenderID, tMessage)
+    guarded(function()
+        parallel.waitForAny(
+            function() self:runPingPong() end,
+            function()
+                while true do
+                    local nSenderID, tMessage = rednet.receive("chat")
+                    self:handleMessage(nSenderID, tMessage)
+                end
             end
-        end
-    )
-    if not ok then
-        os.queueEvent("chat_error", err)
-    end
+        )
+    end)
 
     self:stop()
 end
@@ -292,10 +329,7 @@ end
 --- Kick tous les clients, unhost et ferme le modem.
 function ChatHost:stop()
     for nUserID, tUser in pairs(self.tUsers) do
-        rednet.send(tUser.nID, {
-            sType = "kick",
-            nUserID = nUserID,
-        }, "chat")
+        sendChat(tUser.nID, { sType = "kick", nUserID = nUserID })
     end
     rednet.unhost("chat")
     closeModem(self.sOpenedModem)
@@ -333,21 +367,13 @@ function ChatClient:connect()
     self.nHostID = nHostID
 
     self.nUserID = math.random(1, 2147483647)
-    rednet.send(self.nHostID, {
-        sType = "login",
-        nUserID = self.nUserID,
-        sUsername = self.sUsername,
-    }, "chat")
+    sendChat(self.nHostID, { sType = "login", nUserID = self.nUserID, sUsername = self.sUsername })
 
     return true
 end
 
 function ChatClient:send(sText)
-    rednet.send(self.nHostID, {
-        sType = "chat",
-        nUserID = self.nUserID,
-        sText = sText,
-    }, "chat")
+    sendChat(self.nHostID, { sType = "chat", nUserID = self.nUserID, sText = sText })
 end
 
 --- Boucle d'ecoute + ping-pong. Bloquant : a lancer dans un parallel.waitForAny
@@ -358,65 +384,55 @@ function ChatClient:start()
     local pingPongTimer = os.startTimer(0)
 
     local function ping()
-        rednet.send(self.nHostID, {
-            sType = "ping to server",
-            nUserID = self.nUserID,
-        }, "chat")
+        sendChat(self.nHostID, { sType = "ping to server", nUserID = self.nUserID })
         bPingPonged = false
         pingPongTimer = os.startTimer(15)
     end
 
-    local ok, err = pcall(parallel.waitForAny,
-        function()
-            while true do
-                local sEvent, timer = os.pullEvent("timer")
-                if timer == pingPongTimer then
-                    if not bPingPonged then
-                        os.queueEvent("chat_timeout")
-                        return
-                    else
-                        ping()
-                    end
-                end
-            end
-        end,
-        function()
-            while true do
-                local nSenderID, tMessage = rednet.receive("chat")
-                if nSenderID == self.nHostID and type(tMessage) == "table" and tMessage.nUserID == self.nUserID then
-                    if tMessage.sType == "text" then
-                        if tMessage.sText then
-                            os.queueEvent("chat_message", tMessage.sText)
+    guarded(function()
+        parallel.waitForAny(
+            function()
+                while true do
+                    local sEvent, timer = os.pullEvent("timer")
+                    if timer == pingPongTimer then
+                        if not bPingPonged then
+                            os.queueEvent("chat_timeout")
+                            return
+                        else
+                            ping()
                         end
+                    end
+                end
+            end,
+            function()
+                while true do
+                    local nSenderID, tMessage = rednet.receive("chat")
+                    if nSenderID == self.nHostID and type(tMessage) == "table" and tMessage.nUserID == self.nUserID then
+                        if tMessage.sType == "text" then
+                            if tMessage.sText then
+                                os.queueEvent("chat_message", tMessage.sText)
+                            end
 
-                    elseif tMessage.sType == "ping to client" then
-                        rednet.send(nSenderID, {
-                            sType = "pong to server",
-                            nUserID = self.nUserID,
-                        }, "chat")
+                        elseif tMessage.sType == "ping to client" then
+                            sendChat(nSenderID, { sType = "pong to server", nUserID = self.nUserID })
 
-                    elseif tMessage.sType == "pong to client" then
-                        bPingPonged = true
+                        elseif tMessage.sType == "pong to client" then
+                            bPingPonged = true
 
-                    elseif tMessage.sType == "kick" then
-                        os.queueEvent("chat_kicked")
-                        return
+                        elseif tMessage.sType == "kick" then
+                            os.queueEvent("chat_kicked")
+                            return
 
+                        end
                     end
                 end
             end
-        end
-    )
-    if not ok then
-        os.queueEvent("chat_error", err)
-    end
+        )
+    end)
 end
 
 function ChatClient:logout()
-    rednet.send(self.nHostID, {
-        sType = "logout",
-        nUserID = self.nUserID,
-    }, "chat")
+    sendChat(self.nHostID, { sType = "logout", nUserID = self.nUserID })
     closeModem(self.sOpenedModem)
     self.sOpenedModem = nil
 end
@@ -439,6 +455,12 @@ end
 -- parallele, le routeur ne peut pas les distinguer (un seul salon retenu
 -- par ID emetteur).
 
+--- Decoupe "sous-hote.hote" au premier point (ex: "enimaloc.twitch.tv" ->
+--- "enimaloc", "twitch.tv"). nil si sHostname n'a pas de sous-domaine.
+local function splitSubhost(sHostname)
+    return sHostname:match("^([^.]+)%.(.+)$")
+end
+
 local ChatRouter = {}
 ChatRouter.__index = ChatRouter
 
@@ -455,12 +477,6 @@ end
 --- propre hostname.
 function ChatRouter:register(host)
     self.tRooms[host.sHostname] = host
-end
-
---- Decoupe "sous-hote.hote" au premier point (ex: "enimaloc.twitch.tv" ->
---- "enimaloc", "twitch.tv"). nil si sHostname n'a pas de sous-domaine.
-local function splitSubhost(sHostname)
-    return sHostname:match("^([^.]+)%.(.+)$")
 end
 
 --- Enregistre un gestionnaire de fallback pour sHost (ex: "twitch.tv") :
@@ -549,10 +565,7 @@ function ChatRouter:start()
         end
     end
 
-    local ok, err = pcall(dispatch)
-    if not ok then
-        os.queueEvent("chat_error", err)
-    end
+    guarded(dispatch)
 
     self:stop()
 end
