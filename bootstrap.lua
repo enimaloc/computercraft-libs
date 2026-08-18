@@ -26,8 +26,15 @@
 --       programDir = "/" .. programDir
 --   end
 --   if fs.exists("/lib/bootstrap.lua") then
---       dofile("/lib/bootstrap.lua")(programDir)
+--       local file = fs.open("/lib/bootstrap.lua", "r")
+--       local bootstrap = load(file.readAll(), "/lib/bootstrap.lua", "t", _ENV)
+--       file.close()
+--       bootstrap()(programDir)
 --   end
+-- load(..., "t", _ENV) plutot que dofile() : dofile() charge avec
+-- l'environnement global brut, qui n'a pas require/package (injectes par
+-- le shell uniquement dans l'environnement du programme en cours, pas
+-- dans _G) -- _ENV explicite les transmet a bootstrap.lua.
 local LIB_ROOT = "/lib"
 
 return function(programDir)

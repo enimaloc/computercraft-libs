@@ -22,8 +22,15 @@ end
 -- /lib/bootstrap.lua vit a un emplacement absolu fixe, independant de la
 -- profondeur de ce programme (voir lib/bootstrap.lua) ; absent si les libs
 -- n'ont pas encore ete installees, donc on ne l'appelle que s'il existe.
+-- load(..., "t", _ENV) plutot que dofile() : dofile() charge avec
+-- l'environnement global brut, qui n'a pas require/package (injectes par
+-- le shell uniquement dans l'environnement du programme en cours) --
+-- _ENV explicite les lui transmet.
 if fs.exists("/lib/bootstrap.lua") then
-    dofile("/lib/bootstrap.lua")(programDir)
+    local file = fs.open("/lib/bootstrap.lua", "r")
+    local bootstrap = load(file.readAll(), "/lib/bootstrap.lua", "t", _ENV)
+    file.close()
+    bootstrap()(programDir)
 else
     package.path = programDir .. "/?.lua;" .. package.path
 end
