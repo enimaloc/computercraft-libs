@@ -178,6 +178,17 @@ if chatOk and twitchOk then
         end
     end
 
+    -- Sans ce thread, une erreur dans router:start() (ex: pas de modem, bug
+    -- interne) etait avalee silencieusement : guarded() la transforme en
+    -- evenement "chat_error" que rien n'ecoutait, le thread s'arretait
+    -- juste sans aucun message visible.
+    table.insert(threads, function()
+        while true do
+            local _, sError = os.pullEvent("chat_error")
+            printError("[chat] " .. tostring(sError))
+        end
+    end)
+
     table.insert(threads, function() router:start() end)
     table.insert(threads, function() bot:start() end)
     table.insert(threads, listen)

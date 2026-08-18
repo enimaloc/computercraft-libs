@@ -100,9 +100,17 @@ local function parseIRC(message)
     }
 end
 
---- Démarre la boucle d'écoute
+--- Démarre la boucle d'écoute. Ne se connecte pas immediatement si aucune
+--- chaine n'est encore suivie (Twitch.new({}) puis :join() plus tard,
+--- ex: rejoint a la demande via ChatRouter:onUnknownSubhost) : le proxy
+--- WS ne gere pas forcement une connexion sans chaine, et connect()
+--- bloquerait indefiniment dans sa boucle de retry avant meme d'atteindre
+--- la boucle d'evenements ci-dessous -- self:join() se chargera de la
+--- premiere connexion des qu'une chaine sera ajoutee.
 function Twitch:start()
-    self:connect()
+    if #self.channels > 0 then
+        self:connect()
+    end
     while true do
         local event, url, message = os.pullEventRaw()
         if event == "terminate" then
