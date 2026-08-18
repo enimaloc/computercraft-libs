@@ -256,8 +256,15 @@ local function selfUpdate()
     end
 end
 
-local function install()
-    selfUpdate()
+--- bSelfUpdate (optionnel, defaut true) : passer false quand ce script
+--- n'est pas le programme reellement en cours d'execution (ex: charge et
+--- execute en memoire par setup.lua) -- shell.getRunningProgram() pointe
+--- alors vers un tout autre fichier (le lanceur, voire une ROM en lecture
+--- seule), et l'ecraser serait une corruption, pas une mise a jour.
+local function install(bSelfUpdate)
+    if bSelfUpdate ~= false then
+        selfUpdate()
+    end
 
     if not fs.exists(TARGET_DIR) then
         fs.makeDir(TARGET_DIR)
@@ -296,4 +303,4 @@ local function install()
     print(("Termine : %d fichier(s) a jour, %d echec(s)."):format(okCount, failCount))
 end
 
-install()
+install(...)

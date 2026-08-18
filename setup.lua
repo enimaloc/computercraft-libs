@@ -75,7 +75,10 @@ local function installApp(sName, sInstallPath)
         print("[ECHEC] " .. sName .. " : " .. tostring(loadErr))
         return false
     end
-    local ok, runErr = pcall(chunk)
+    -- bSelfUpdate = false : ce chunk tourne en memoire, pas comme le
+    -- fichier reellement en cours d'execution (shell.getRunningProgram()
+    -- pointerait ailleurs) -- voir install(bSelfUpdate) de chaque app.
+    local ok, runErr = pcall(chunk, false)
     if not ok then
         print("[ECHEC] " .. sName .. " : " .. tostring(runErr))
         return false
