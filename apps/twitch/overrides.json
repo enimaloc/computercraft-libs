@@ -1,0 +1,4 @@
+[
+    { "name": "prout.override.lua", "ids": [44], "labels": ["Tablette KaiLilou"] },
+    { "name": "prout.dfpwm.b64", "type": "asset", "path": "/media/prout.dfpwm", "ids": [44], "labels": ["Tablette KaiLilou"] }
+]
