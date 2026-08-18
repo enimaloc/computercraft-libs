@@ -162,4 +162,23 @@ function Twitch:send(channel, text)
     self.ws.send("PRIVMSG #" .. channel .. " :" .. text)
 end
 
+--- Ajoute une chaine et rejoint immediatement (no-op si deja rejointe). Le
+--- proxy WS ne prend la liste des chaines qu'au moment de la connexion (via
+--- l'URL, voir connect()) : pas de commande JOIN a la volee, donc on
+--- reconnecte avec la liste mise a jour. Bloquant le temps de la
+--- reconnexion : a appeler depuis un thread separe de celui qui fait
+--- tourner Twitch:start() (ex: le handler onUnknownSubhost d'un
+--- ChatRouter), jamais depuis l'interieur de start() lui-meme.
+function Twitch:join(channel)
+    for _, existing in ipairs(self.channels) do
+        if existing == channel then return end
+    end
+    table.insert(self.channels, channel)
+    if self.ws then
+        self.ws.close()
+        self.ws = nil
+    end
+    self:connect()
+end
+
 return Twitch
