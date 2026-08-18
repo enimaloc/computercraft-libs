@@ -1,9 +1,18 @@
 -- bootstrap.lua
--- Partage par toutes les apps de projects/app/<nom>/, deployees a la
--- racine du computer (/<nom>/, un seul niveau -- pas /apps/<nom>/) :
--- configure package.path pour que leurs require() resolvent aussi bien
--- vers leur propre dossier que vers n'importe quel dossier de /lib/, sans
--- que chaque app n'ait a lister les libs dont elle depend.
+-- Partage par toutes les apps : configure package.path pour que leurs
+-- require() resolvent aussi bien vers leur propre dossier que vers
+-- n'importe quel dossier de /lib/, sans que chaque app n'ait a lister les
+-- libs dont elle depend.
+--
+-- /lib/ est toujours a un emplacement absolu fixe sur le computer deploye
+-- (voir l'installeur commun, lib/install.lua), independant de la ou vit
+-- l'app elle-meme (/twitch/, /startup.lua a la racine, etc. -- la
+-- profondeur varie par app). D'ou une constante absolue plutot qu'un
+-- calcul relatif du genre fs.combine(programDir, "../lib") : ce dernier
+-- devrait connaitre la profondeur exacte de programDir pour etre juste, et
+-- fs.combine ne "clamp" pas les ".." au-dela de la racine (contrairement a
+-- la plupart des implementations POSIX) -- un ".." de trop ou de pas assez
+-- produit un chemin cassé plutot qu'une erreur visible.
 --
 -- Une lib est un simple sous-dossier de lib/ (ex: lib/print_utils/,
 -- lib/animation/) : rien ne l'attache a une app en particulier, plusieurs
@@ -16,20 +25,17 @@
 --   if programDir:sub(1, 1) ~= "/" then
 --       programDir = "/" .. programDir
 --   end
---   dofile(fs.combine(programDir, "../lib/bootstrap.lua"))(programDir)
---
--- fs.combine ne "clamp" pas les ".." au-dela de la racine (contrairement a
--- la plupart des implementations POSIX) : il produit un chemin du genre
--- "../lib/xxx" au lieu de le ramener a "/lib/xxx" si on met un ".." de
--- trop. D'ou l'importance de ne remonter QUE d'un niveau ici, puisque
--- programDir n'a lui-meme qu'un seul niveau de profondeur.
+--   if fs.exists("/lib/bootstrap.lua") then
+--       dofile("/lib/bootstrap.lua")(programDir)
+--   end
+local LIB_ROOT = "/lib"
+
 return function(programDir)
     local path = programDir .. "/?.lua;"
 
-    local libRoot = fs.combine(programDir, "../lib")
-    if fs.exists(libRoot) and fs.isDir(libRoot) then
-        for _, name in ipairs(fs.list(libRoot)) do
-            local dir = fs.combine(libRoot, name)
+    if fs.exists(LIB_ROOT) and fs.isDir(LIB_ROOT) then
+        for _, name in ipairs(fs.list(LIB_ROOT)) do
+            local dir = fs.combine(LIB_ROOT, name)
             if fs.isDir(dir) then
                 path = path .. dir .. "/?.lua;"
             end

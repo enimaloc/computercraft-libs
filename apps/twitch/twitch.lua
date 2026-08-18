@@ -19,11 +19,11 @@ local programDir = fs.getDir(shell.getRunningProgram())
 if programDir:sub(1, 1) ~= "/" then
     programDir = "/" .. programDir
 end
--- Sur un deploiement flat (install.lua, /twitch/) projects/lib/bootstrap.lua
--- n'existe pas : dofile echoue, donc on l'appelle seulement s'il est present.
-local bootstrapPath = fs.combine(programDir, "../lib/bootstrap.lua")
-if fs.exists(bootstrapPath) then
-    dofile(bootstrapPath)(programDir)
+-- /lib/bootstrap.lua vit a un emplacement absolu fixe, independant de la
+-- profondeur de ce programme (voir lib/bootstrap.lua) ; absent si les libs
+-- n'ont pas encore ete installees, donc on ne l'appelle que s'il existe.
+if fs.exists("/lib/bootstrap.lua") then
+    dofile("/lib/bootstrap.lua")(programDir)
 else
     package.path = programDir .. "/?.lua;" .. package.path
 end

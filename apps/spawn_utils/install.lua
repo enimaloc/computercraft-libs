@@ -1,14 +1,15 @@
 -- install.lua
--- Telecharge (ou met a jour) l'app spawn_utils dans /spawn_utils/, installe
--- ses libs partagees dans /lib/, et se met a jour lui-meme. A executer
--- depuis le shell CraftOS sur le computer :
+-- Telecharge (ou met a jour) l'app spawn_utils a la racine (/startup.lua,
+-- pour que CraftOS le lance automatiquement au boot), installe ses libs
+-- partagees dans /lib/, et se met a jour lui-meme. A executer depuis le
+-- shell CraftOS sur le computer :
 --   pastebin get <code> install   -- une seule fois, pour recuperer ce script
 --   install                        -- ensuite, a chaque mise a jour
 
 local REPO_RAW = "https://raw.githubusercontent.com/enimaloc/computercraft-libs/main/"
 local APP_RAW = REPO_RAW .. "apps/spawn_utils/"
 
-local TARGET_DIR = "/spawn_utils"
+local TARGET_DIR = "/"
 
 -- Libs partagees (github.com/enimaloc/computercraft-libs), installees a
 -- part dans /lib/<nom>/ par l'installeur commun a toutes les apps.
