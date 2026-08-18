@@ -114,7 +114,14 @@ if chatOk and twitchOk then
                     end
                     chatChannel:send(sUsers, tUser.nUserID)
                 end,
+                ["me"] = function(tUser) end,
+                ["nick"] = function(tUser) end
             },
+            onLogin = function(tUser)
+                chatChannel:send("Ce salon est en lecture seul", tUser.nUserID)
+                return false, ""
+            end,
+            onLogout = function(tUser) return false, "" end
         })
         router:register(chatChannel)
         return chatChannel

@@ -1,0 +1,4 @@
+{
+    "twitch": "apps/twitch/install.lua",
+    "spawn_utils": "apps/spawn_utils/install.lua"
+}
