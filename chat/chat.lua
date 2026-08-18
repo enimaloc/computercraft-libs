@@ -144,22 +144,31 @@ function ChatHost:ping(nUserID)
     self.tPingPongTimer[timer] = nUserID
 end
 
+--- Traite l'expiration (ou non) d'un timer de ping-pong. Utilise aussi
+--- bien par ChatHost:runPingPong() (mode salon unique) que par ChatRouter
+--- (mode multi-salons), qui possede seul la boucle os.pullEvent("timer")
+--- et lui redirige les timers de ce salon -- voir handleMessage plus haut
+--- pour le meme principe applique aux messages.
+function ChatHost:handlePingTimeout(nTimerId)
+    local nUserID = self.tPingPongTimer[nTimerId]
+    if nUserID and self.tUsers[nUserID] then
+        local tUser = self.tUsers[nUserID]
+        if not tUser.bPingPonged then
+            self:send("* " .. tUser.sUsername .. " has timed out")
+            self.tUsers[nUserID] = nil
+            self.nUsers = self.nUsers - 1
+            os.queueEvent("chat_user_left", tUser.sUsername, nUserID)
+        else
+            self:ping(nUserID)
+        end
+    end
+end
+
 --- Boucle de ping-pong. Bloquant : a lancer dans un parallel.waitForAny.
 function ChatHost:runPingPong()
     while true do
         local _, timer = os.pullEvent("timer")
-        local nUserID = self.tPingPongTimer[timer]
-        if nUserID and self.tUsers[nUserID] then
-            local tUser = self.tUsers[nUserID]
-            if not tUser.bPingPonged then
-                self:send("* " .. tUser.sUsername .. " has timed out")
-                self.tUsers[nUserID] = nil
-                self.nUsers = self.nUsers - 1
-                os.queueEvent("chat_user_left", tUser.sUsername, nUserID)
-            else
-                self:ping(nUserID)
-            end
-        end
+        self:handlePingTimeout(timer)
     end
 end
 
@@ -438,6 +447,7 @@ function ChatRouter.new()
         sOpenedModem = nil,
         tRooms = {},
         tSenderRoom = {},
+        tHostHandlers = {},
     }, ChatRouter)
 end
 
@@ -447,10 +457,61 @@ function ChatRouter:register(host)
     self.tRooms[host.sHostname] = host
 end
 
---- Demarre le routeur : ouvre le modem, repond aux lookups pour tous les
---- salons enregistres, et fait tourner chaque salon en parallele.
---- Bloquant : a lancer dans un parallel.waitForAny aux cotes de la boucle
---- de rendu du consommateur.
+--- Decoupe "sous-hote.hote" au premier point (ex: "enimaloc.twitch.tv" ->
+--- "enimaloc", "twitch.tv"). nil si sHostname n'a pas de sous-domaine.
+local function splitSubhost(sHostname)
+    return sHostname:match("^([^.]+)%.(.+)$")
+end
+
+--- Enregistre un gestionnaire de fallback pour sHost (ex: "twitch.tv") :
+--- appele quand un lookup pour "<sous-hote>.<sHost>" ne matche aucune
+--- salle enregistree. fnHandler(sSubhost, nSenderID) doit renvoyer un
+--- ChatHost (deja enregistre via router:register, ou cree puis enregistre
+--- a la volee -- utile pour provisionner un salon a la demande et y
+--- rediriger l'utilisateur), ou nil pour rejeter la demande (le lookup
+--- echoue cote client, comme un hostname inconnu classique).
+--- Le resultat est mis en cache sous le hostname complet demande : les
+--- lookups suivants pour le meme sous-hote ne re-appellent pas fnHandler.
+function ChatRouter:onUnknownSubhost(sHost, fnHandler)
+    self.tHostHandlers[sHost] = fnHandler
+end
+
+--- Repond a un lookup DNS "chat" : exact match dans tRooms, sinon fallback
+--- via tHostHandlers (voir onUnknownSubhost). Enregistre le salon trouve
+--- comme salon courant de nSenderID pour router ses prochains messages.
+function ChatRouter:handleLookup(nSenderID, sHostname)
+    local host = self.tRooms[sHostname]
+
+    if not host then
+        local sSubhost, sHost = splitSubhost(sHostname)
+        local fnHandler = sHost and self.tHostHandlers[sHost]
+        if fnHandler then
+            host = fnHandler(sSubhost, nSenderID)
+            if host then
+                -- Cache l'alias : les prochains lookups de ce hostname
+                -- exact matchent directement, sans rappeler fnHandler.
+                self.tRooms[sHostname] = host
+            end
+        end
+    end
+
+    if host then
+        self.tSenderRoom[nSenderID] = sHostname
+        rednet.send(nSenderID, {
+            sType = "lookup response",
+            sHostname = sHostname,
+            sProtocol = "chat",
+        }, "dns")
+    end
+end
+
+--- Demarre le routeur : ouvre le modem, repond aux lookups, route les
+--- messages vers le bon salon et distribue les timers de ping-pong.
+--- Une seule boucle d'evenements (pas un thread de ping-pong par salon) :
+--- necessaire pour que les salons crees a la volee par un handler de
+--- onUnknownSubhost aient leur ping-pong actif des leur creation, sans
+--- devoir relancer parallel.waitForAny. Bloquant : a lancer dans un
+--- parallel.waitForAny aux cotes de la boucle de rendu du consommateur.
 function ChatRouter:start()
     self.sOpenedModem = openModem()
     if not self.sOpenedModem then
@@ -460,32 +521,35 @@ function ChatRouter:start()
 
     local function dispatch()
         while true do
-            local nSenderID, tMessage, sProtocol = rednet.receive()
-            if sProtocol == "dns" and type(tMessage) == "table" and tMessage.sType == "lookup"
-                and tMessage.sProtocol == "chat" and self.tRooms[tMessage.sHostname] then
-                self.tSenderRoom[nSenderID] = tMessage.sHostname
-                rednet.send(nSenderID, {
-                    sType = "lookup response",
-                    sHostname = tMessage.sHostname,
-                    sProtocol = "chat",
-                }, "dns")
+            local event, a, b, c = os.pullEvent()
 
-            elseif sProtocol == "chat" then
-                local sRoom = self.tSenderRoom[nSenderID]
-                local host = sRoom and self.tRooms[sRoom]
-                if host then
-                    host:handleMessage(nSenderID, tMessage)
+            if event == "rednet_message" then
+                local nSenderID, tMessage, sProtocol = a, b, c
+                if sProtocol == "dns" and type(tMessage) == "table" and tMessage.sType == "lookup"
+                    and tMessage.sProtocol == "chat" then
+                    self:handleLookup(nSenderID, tMessage.sHostname)
+
+                elseif sProtocol == "chat" then
+                    local sRoom = self.tSenderRoom[nSenderID]
+                    local host = sRoom and self.tRooms[sRoom]
+                    if host then
+                        host:handleMessage(nSenderID, tMessage)
+                    end
+                end
+
+            elseif event == "timer" then
+                local nTimerId = a
+                for _, host in pairs(self.tRooms) do
+                    if host.tPingPongTimer[nTimerId] then
+                        host:handlePingTimeout(nTimerId)
+                        break
+                    end
                 end
             end
         end
     end
 
-    local tFns = { dispatch }
-    for _, host in pairs(self.tRooms) do
-        table.insert(tFns, function() host:runPingPong() end)
-    end
-
-    local ok, err = pcall(parallel.waitForAny, table.unpack(tFns))
+    local ok, err = pcall(dispatch)
     if not ok then
         os.queueEvent("chat_error", err)
     end
