@@ -44,7 +44,12 @@ return function(programDir)
         for _, name in ipairs(fs.list(LIB_ROOT)) do
             local dir = fs.combine(LIB_ROOT, name)
             if fs.isDir(dir) then
-                path = path .. dir .. "/?.lua;"
+                -- fs.combine renvoie un chemin sans "/" en tete (meme si
+                -- LIB_ROOT en a un) : sans le rajouter ici, cette entree de
+                -- package.path serait recombinee avec le pwd du shell (voir
+                -- le commentaire sur programDir plus haut) au lieu de rester
+                -- ancree sur /lib.
+                path = path .. "/" .. dir .. "/?.lua;"
             end
         end
     end
