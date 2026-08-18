@@ -1,0 +1,11 @@
+{
+    "print_utils": ["print_utils.lua"],
+    "text_utils": ["text_utils.lua"],
+    "color_utils": ["color_utils.lua"],
+    "animation": ["animation_engine.lua", "animation_definition.lua"],
+    "override_loader": ["override_loader.lua"],
+    "twitch_api": ["twitch_api.lua"],
+    "chat": ["chat.lua"],
+    "ntfy": ["ntfy.lua"],
+    "tps": ["tps.lua"]
+}
