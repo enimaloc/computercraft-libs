@@ -1,4 +1,7 @@
 {
     "twitch": "apps/twitch/install.lua",
-    "spawn_utils": "apps/spawn_utils/install.lua"
+    "spawn_utils": "apps/spawn_utils/install.lua",
+    "adboard_server": "apps/adboard_server/install.lua",
+    "adboard_submit": "apps/adboard_submit/install.lua",
+    "adboard_display": "apps/adboard_display/install.lua"
 }
