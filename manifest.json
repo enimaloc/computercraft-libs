@@ -7,5 +7,6 @@
     "twitch_api": ["twitch_api.lua"],
     "chat": ["chat.lua"],
     "ntfy": ["ntfy.lua"],
-    "tps": ["tps.lua"]
+    "tps": ["tps.lua"],
+    "adboard_protocol": ["adboard_protocol.lua"]
 }
