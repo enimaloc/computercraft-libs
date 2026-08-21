@@ -20,8 +20,15 @@ end
 
 --- apps.json : { "nom" = "apps/nom/install.lua", ... }, genere par
 --- push-to-repo.sh a partir de projects/app/.
-local function fetchApps()
-    local content, err = download(REPO_RAW .. "apps.json")
+--- bBustCache : ajoute un parametre de requete unique (horodatage) pour
+--- forcer le CDN raw.githubusercontent.com a resservir l'origine plutot
+--- que sa version en cache (fraiche a quelques minutes pres apres un push).
+local function fetchApps(bBustCache)
+    local url = REPO_RAW .. "apps.json"
+    if bBustCache then
+        url = url .. "?_=" .. os.epoch("utc")
+    end
+    local content, err = download(url)
     if not content then
         return nil, err
     end
@@ -33,15 +40,21 @@ local function fetchApps()
 end
 
 --- Affiche la liste numerotee des apps et lit un choix : un ou plusieurs
---- numeros separes par des espaces, ou "all". Renvoie la liste des noms
---- d'app choisis (vide si rien de valide n'a ete saisi).
+--- numeros separes par des espaces, "all", ou "r"/"refresh". Renvoie soit
+--- la liste des noms d'app choisis (vide si rien de valide n'a ete saisi),
+--- soit le sentinel "REFRESH" pour demander a l'appelant de reessayer
+--- fetchApps() avec cache-busting et de reafficher la liste.
 local function promptSelection(tAppNames)
     print("Apps disponibles :")
     for i, sName in ipairs(tAppNames) do
         print(("  %d) %s"):format(i, sName))
     end
-    write("Choix (numeros separes par des espaces, ou \"all\") : ")
+    write("Choix (numeros separes par des espaces, \"all\", ou \"r\" pour rafraichir la liste) : ")
     local sInput = read() or ""
+
+    if sInput:match("^%s*[rR]%s*$") or sInput:match("^%s*refresh%s*$") then
+        return "REFRESH"
+    end
 
     if sInput:match("^%s*all%s*$") then
         return tAppNames
@@ -87,31 +100,39 @@ local function installApp(sName, sInstallPath)
 end
 
 local function main()
-    local apps, err = fetchApps()
-    if not apps then
-        print("[ECHEC] recuperation de la liste des apps : " .. tostring(err))
-        return
-    end
+    local bBustCache = false
 
-    local tAppNames = {}
-    for sName in pairs(apps) do
-        table.insert(tAppNames, sName)
-    end
-    table.sort(tAppNames)
+    while true do
+        local apps, err = fetchApps(bBustCache)
+        if not apps then
+            print("[ECHEC] recuperation de la liste des apps : " .. tostring(err))
+            return
+        end
 
-    if #tAppNames == 0 then
-        print("Aucune app disponible.")
-        return
-    end
+        local tAppNames = {}
+        for sName in pairs(apps) do
+            table.insert(tAppNames, sName)
+        end
+        table.sort(tAppNames)
 
-    local tSelected = promptSelection(tAppNames)
-    if #tSelected == 0 then
-        print("Aucune app selectionnee.")
-        return
-    end
+        if #tAppNames == 0 then
+            print("Aucune app disponible.")
+            return
+        end
 
-    for _, sName in ipairs(tSelected) do
-        installApp(sName, apps[sName])
+        local tSelected = promptSelection(tAppNames)
+        if tSelected == "REFRESH" then
+            bBustCache = true
+            print("Rafraichissement de la liste...")
+        elseif #tSelected == 0 then
+            print("Aucune app selectionnee.")
+            return
+        else
+            for _, sName in ipairs(tSelected) do
+                installApp(sName, apps[sName])
+            end
+            return
+        end
     end
 end
 
