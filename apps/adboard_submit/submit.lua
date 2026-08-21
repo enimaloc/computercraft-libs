@@ -1,6 +1,8 @@
 -- submit.lua
 -- Client de soumission adboard : editeur pixel-art minimal cale sur la
--- resolution du monitor attache, envoie le resultat au serveur via
+-- resolution de son ecran (monitor attache si present, sinon le terminal
+-- courant -- fonctionne donc aussi bien depuis une pocket computer ou un
+-- computer sans peripherique monitor), envoie le resultat au serveur via
 -- rednet. Voir docs/superpowers/specs/2026-08-21-adboard-design.md.
 
 local args = {...}
@@ -57,13 +59,16 @@ if not modem then
 end
 rednet.open(peripheral.getName(modem))
 
+--- monitor peripheral si present (computer avec ecran externe), sinon le
+--- terminal courant (pocket computer, ou computer sans monitor attache) --
+--- les deux exposent la meme API de dessin (setCursorPos/
+--- setBackgroundColor/write/clear/getSize), seul l'evenement de toucher
+--- differe (voir touchEvent plus bas).
 local monitor = peripheral.find("monitor")
-if not monitor then
-    printError("[adboard-submit] aucun monitor attache, arret.")
-    return
-end
+local canvas = monitor or term.current()
+local touchEvent = monitor and "monitor_touch" or "mouse_click"
 
-local width, height = monitor.getSize()
+local width, height = canvas.getSize()
 
 --- Mapping caractere -> couleur CC, identique au programme paint natif.
 local PALETTE_KEYS = {
@@ -84,9 +89,9 @@ local selectedColor = colors.white
 
 local function paintCell(x, y)
     grid[y][x] = selectedColor
-    monitor.setCursorPos(x, y)
-    monitor.setBackgroundColor(selectedColor)
-    monitor.write(" ")
+    canvas.setCursorPos(x, y)
+    canvas.setBackgroundColor(selectedColor)
+    canvas.write(" ")
 end
 
 local function submit()
@@ -106,14 +111,14 @@ local function submit()
     end
 end
 
-monitor.setBackgroundColor(colors.black)
-monitor.clear()
-print("Palette : 1-9, a-g. Touchez le monitor pour peindre.")
+canvas.setBackgroundColor(colors.black)
+canvas.clear()
+print("Palette : 1-9, a-g. Cliquez/touchez l'ecran pour peindre.")
 print("'s' pour envoyer, 'q' pour quitter.")
 
 while true do
     local event, p1, p2, p3 = os.pullEvent()
-    if event == "monitor_touch" then
+    if event == touchEvent and (touchEvent ~= "mouse_click" or p1 == 1) then
         local x, y = p2, p3
         if grid[y] and x >= 1 and x <= width then
             paintCell(x, y)
